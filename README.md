@@ -1,5 +1,5 @@
 # parcel-plugin-clean-dist
-This is a package a parcel plugin which delete the last bundled files before compile.
+This package is a parcel plugin which delete the last bundled files before compile.
 
 ## Installation
 ```bash
