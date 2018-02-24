@@ -1,3 +1,4 @@
+const path = require('path');
 const fs = require('fs');
 
 module.exports = () => {
@@ -9,7 +10,7 @@ module.exports = () => {
     else {
         distDirName = 'dist';
     }
-    const absDistDirName = `${process.cwd()}/${distDirName}`;
+    const absDistDirName = path.resolve(process.cwd(), distDirName);
     try {
         if (fs.statSync(absDistDirName).isDirectory()) {
             const files = fs.readdirSync(absDistDirName);
