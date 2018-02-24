@@ -1,0 +1,8 @@
+{
+  "name": "parcel-plugin-clean-dist",
+  "version": "0.0.3",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qinshixixing/parcel-plugin-clean-dist.git"
+  }
+}
