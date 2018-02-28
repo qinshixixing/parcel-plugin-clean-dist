@@ -1,21 +1,13 @@
 const path = require('path');
 const fs = require('fs');
 
-module.exports = () => {
-    let distDirName;
-    let outDirIndex = process.argv.indexOf('--out-dir');
-    if (outDirIndex > -1) {
-        distDirName = process.argv[outDirIndex + 1];
-    }
-    else {
-        distDirName = 'dist';
-    }
-    const absDistDirName = path.resolve(process.cwd(), distDirName);
+module.exports = (bundler) => {
+    const outDir = bundler.options.outDir;
     try {
-        if (fs.statSync(absDistDirName).isDirectory()) {
-            const files = fs.readdirSync(absDistDirName);
+        if (fs.statSync(outDir).isDirectory()) {
+            const files = fs.readdirSync(outDir);
             files.forEach((file, index) => {
-                const filePath = `${absDistDirName}/${file}`;
+                const filePath = `${outDir}/${file}`;
                 fs.unlinkSync(filePath);
             });
         }
