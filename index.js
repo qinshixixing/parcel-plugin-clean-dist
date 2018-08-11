@@ -1,16 +1,15 @@
 const path = require('path');
 const fs = require('fs');
+const rimraf = require('rimraf');
 
 module.exports = (bundler) => {
     const outDir = bundler.options.outDir;
     try {
         if (fs.statSync(outDir).isDirectory()) {
-            const files = fs.readdirSync(outDir);
-            files.forEach((file, index) => {
-                const filePath = `${outDir}/${file}`;
-                fs.unlinkSync(filePath);
-            });
+                rimraf.sync(`${outDir}/{*,.*}`);
         }
+    } catch (err) {
+        console.error(`couldn't clean directory: ${outDir}`);
+        console.error(err);
     }
-    catch (err) {}
 };

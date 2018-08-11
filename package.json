@@ -4,5 +4,8 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/qinshixixing/parcel-plugin-clean-dist.git"
+  },
+  "dependencies": {
+    "rimraf": "^2.6.2"
   }
 }
