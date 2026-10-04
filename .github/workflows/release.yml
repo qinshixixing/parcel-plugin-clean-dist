@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm test
+      - name: Require the tag to match package.json
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$tag" != "$version" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package.json version ${version}."
+            exit 1
+          fi
+      - run: npm publish
+      - name: Publish the GitHub Release from CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node <<'EOF'
+          const fs = require('fs');
+          const version = require('./package.json').version;
+          const text = fs.readFileSync('CHANGELOG.md', 'utf8');
+          const heading = new RegExp(`^## ${version.replace(/\./g, '\\.')}\\s*$`, 'm');
+          const match = heading.exec(text);
+          if (!match) {
+            console.error(`CHANGELOG.md has no section for ${version}.`);
+            process.exit(1);
+          }
+          const rest = text.slice(match.index + match[0].length);
+          const next = rest.search(/^## /m);
+          const body = (next === -1 ? rest : rest.slice(0, next)).trim();
+          if (!body) {
+            console.error(`CHANGELOG section ${version} is empty.`);
+            process.exit(1);
+          }
+          fs.writeFileSync('release-notes.md', `${body}\n`);
+          EOF
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md

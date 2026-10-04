@@ -1,7 +1,8 @@
-# Created by .ignore support plugin (hsz.mobi)
-### Example user template template
-### Example user template
-
 # IntelliJ project files
 .idea
+
+node_modules
+dist
+.parcel-cache
+.swc-cache
 

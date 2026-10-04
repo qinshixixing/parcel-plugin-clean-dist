@@ -1,16 +1,34 @@
-const path = require('path');
-const fs = require('fs');
+const {Reporter} = require('@parcel/plugin');
+const {cleanDist, loadConfig} = require('./lib/clean');
 
-module.exports = (bundler) => {
-    const outDir = bundler.options.outDir;
-    try {
-        if (fs.statSync(outDir).isDirectory()) {
-            const files = fs.readdirSync(outDir);
-            files.forEach((file, index) => {
-                const filePath = `${outDir}/${file}`;
-                fs.unlinkSync(filePath);
-            });
-        }
+module.exports = new Reporter({
+  async report({event, options, logger}) {
+    if (event.type !== 'buildSuccess') {
+      return;
     }
-    catch (err) {}
-};
+
+    const config = await loadConfig(options.inputFS, options.projectRoot);
+    if (options.mode !== 'production' && !config.watch) {
+      return;
+    }
+
+    const {removed, refusals} = await cleanDist({
+      bundles: event.bundleGraph.getBundles(),
+      outputFS: options.outputFS,
+      projectRoot: options.projectRoot,
+      exclude: config.exclude,
+    });
+
+    for (const message of refusals) {
+      logger.error({message});
+    }
+
+    if (removed > 0) {
+      logger.info({
+        message: `Removed ${removed} stale ${
+          removed === 1 ? 'file' : 'files'
+        } from the output directory.`,
+      });
+    }
+  },
+});
