@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.1
+
+- Keep the output directory of a target when it becomes empty instead of deleting it. Nested target directories were removed by the parent's empty-directory cleanup.
+- Treat only a leading `..` segment as leaving a directory. A name like `..backup` stays inside the project, and `exclude` patterns such as `..assets/**` now apply.
+- Compile `exclude` globs once per build instead of once per file and pattern.
+- Read directory entries with their file type and skip the `lstat` per entry; remove empty directories without a second `readdir`.
+- Make the integration tests independent of Parcel's incremental cache, which could reuse a previous build and fail intermittently.
+- Test on Node 18, 20, 22, and 24. Require Node 18 or newer.
+
 ## 1.0.0
 
 This release targets Parcel 2. Parcel 1 projects should stay on 0.0.6.

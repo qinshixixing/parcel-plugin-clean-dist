@@ -3,9 +3,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const {describe, test} = require('node:test');
-const {FSCache} = require('@parcel/cache');
 const {Parcel} = require('@parcel/core');
-const {NodeFS} = require('@parcel/fs');
 
 // Node's test runner copies its own flags into process.execArgv. Parcel
 // forwards that list to workers, and workers reject several of those flags.
@@ -53,8 +51,10 @@ async function runParcel(dir, mode = 'production') {
     mode,
     shouldAutoInstall: false,
     logLevel: 'error',
-    // FSCache avoids the native LMDB cache, which cannot open in some sandboxes.
-    cache: new FSCache(new NodeFS(), path.join(dir, '.parcel-cache')),
+    // Each run builds from scratch. Parcel's incremental cache can miss a
+    // source edit that lands between two runs in the same process and serve
+    // the previous output again, which made these tests flaky.
+    shouldDisableCache: true,
     defaultTargetOptions: {
       distDir: path.join(dir, 'dist'),
       shouldOptimize: false,

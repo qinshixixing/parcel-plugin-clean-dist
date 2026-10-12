@@ -1,8 +1,12 @@
 {
   "name": "parcel-plugin-clean-dist",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Parcel 2 reporter that removes stale files from the dist directory after a successful build.",
   "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
   "scripts": {
     "test": "node --test"
   },
@@ -23,7 +27,7 @@
   },
   "homepage": "https://github.com/qinshixixing/parcel-plugin-clean-dist#readme",
   "engines": {
-    "node": ">=16",
+    "node": ">=18",
     "parcel": "2.x"
   },
   "files": [

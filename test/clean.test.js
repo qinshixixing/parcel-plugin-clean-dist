@@ -9,10 +9,19 @@ const {cleanDist, loadConfig, unsafeReason} = require('../lib/clean');
 function nodeFS() {
   return {
     readFile: (filePath, encoding) => fsp.readFile(filePath, encoding),
-    readdir: (directory) => fsp.readdir(directory),
+    readdir: (directory, opts) => fsp.readdir(directory, opts),
     lstat: (filePath) => fsp.lstat(filePath),
     unlink: (filePath) => fsp.unlink(filePath),
     rimraf: (filePath) => fsp.rm(filePath, {recursive: true, force: true}),
+  };
+}
+
+// A filesystem that ignores readdir options and returns plain names, the way
+// an older wrapper around node:fs does.
+function stringEntryFS() {
+  return {
+    ...nodeFS(),
+    readdir: (directory) => fsp.readdir(directory),
   };
 }
 
@@ -207,5 +216,99 @@ test('refuses to clean a directory outside the project', async () => {
   } finally {
     await fsp.rm(projectRoot, {recursive: true, force: true});
     await fsp.rm(outside, {recursive: true, force: true});
+  }
+});
+
+test('keeps a nested output directory of a target even when it is empty', async () => {
+  const {projectRoot, distDir, outputFS} = await makeProject();
+  const nested = path.join(distDir, 'nested');
+  try {
+    await fsp.mkdir(nested, {recursive: true});
+    await fsp.writeFile(path.join(distDir, 'app.js'), 'bundle');
+    await fsp.writeFile(path.join(nested, 'stale.txt'), 'stale');
+
+    const result = await cleanDist({
+      bundles: [
+        {
+          files: [{filePath: path.join(distDir, 'app.js')}],
+          target: {distDir},
+        },
+        {
+          files: [],
+          target: {distDir: nested},
+        },
+      ],
+      outputFS,
+      projectRoot,
+      exclude: [],
+    });
+
+    assert.equal(result.removed, 1);
+    assert.equal(fs.existsSync(nested), true);
+    assert.equal(fs.existsSync(path.join(nested, 'stale.txt')), false);
+  } finally {
+    await fsp.rm(projectRoot, {recursive: true, force: true});
+  }
+});
+
+test('names that merely start with dots stay inside the project', async () => {
+  const projectRoot = path.resolve('/work/app');
+  assert.equal(
+    unsafeReason(path.join(projectRoot, '..backup'), projectRoot),
+    null,
+  );
+
+  const {projectRoot: root, distDir, outputFS} = await makeProject();
+  const odd = path.join(distDir, '..assets');
+  try {
+    await fsp.mkdir(odd, {recursive: true});
+    await fsp.writeFile(path.join(odd, 'logo.svg'), 'svg');
+    await fsp.writeFile(path.join(distDir, 'app.js'), 'bundle');
+
+    const result = await cleanDist({
+      bundles: [
+        {
+          files: [{filePath: path.join(distDir, 'app.js')}],
+          target: {distDir},
+        },
+      ],
+      outputFS,
+      projectRoot: root,
+      exclude: ['..assets/**'],
+    });
+
+    assert.equal(result.removed, 0);
+    assert.equal(fs.existsSync(path.join(odd, 'logo.svg')), true);
+  } finally {
+    await fsp.rm(root, {recursive: true, force: true});
+  }
+});
+
+test('cleans when readdir returns plain names instead of dirents', async () => {
+  const {projectRoot, distDir} = await makeProject();
+  try {
+    await fsp.writeFile(path.join(distDir, 'app.js'), 'bundle');
+    await fsp.writeFile(path.join(distDir, 'app.js.map'), 'map');
+    await fsp.mkdir(path.join(distDir, 'nested'), {recursive: true});
+    await fsp.writeFile(path.join(distDir, 'nested', 'old.js'), 'old');
+
+    const result = await cleanDist({
+      bundles: [
+        {
+          files: [{filePath: path.join(distDir, 'app.js')}],
+          target: {distDir},
+        },
+      ],
+      outputFS: stringEntryFS(),
+      projectRoot,
+      exclude: [],
+    });
+
+    assert.equal(result.removed, 1);
+    assert.equal(fs.existsSync(path.join(distDir, 'app.js')), true);
+    assert.equal(fs.existsSync(path.join(distDir, 'app.js.map')), true);
+    assert.equal(fs.existsSync(path.join(distDir, 'nested')), false);
+  } finally {
+    await fsp.rm(projectRoot, {recursive: true, force: true});
   }
 });
