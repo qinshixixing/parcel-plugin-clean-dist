@@ -13,6 +13,7 @@ function nodeFS() {
     lstat: (filePath) => fsp.lstat(filePath),
     unlink: (filePath) => fsp.unlink(filePath),
     rimraf: (filePath) => fsp.rm(filePath, {recursive: true, force: true}),
+    realpath: (filePath) => fsp.realpath(filePath),
   };
 }
 
@@ -281,6 +282,196 @@ test('names that merely start with dots stay inside the project', async () => {
     assert.equal(fs.existsSync(path.join(odd, 'logo.svg')), true);
   } finally {
     await fsp.rm(root, {recursive: true, force: true});
+  }
+});
+
+test('refuses to clean a symlink that points outside the project', async () => {
+  const {projectRoot, outputFS} = await makeProject();
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'clean-dist-outside-'));
+  const link = path.join(projectRoot, 'dist-link');
+  try {
+    await fsp.symlink(outside, link);
+    await fsp.writeFile(path.join(outside, 'stale.txt'), 'stay');
+    await fsp.writeFile(path.join(outside, 'app.js'), 'bundle');
+
+    const result = await cleanDist({
+      bundles: [
+        {
+          files: [{filePath: path.join(link, 'app.js')}],
+          target: {distDir: link},
+        },
+      ],
+      outputFS,
+      projectRoot,
+      exclude: [],
+    });
+
+    assert.equal(result.removed, 0);
+    assert.equal(result.refusals.length, 1);
+    assert.match(result.refusals[0], /outside the project root/);
+    assert.equal(await fsp.readFile(path.join(outside, 'stale.txt'), 'utf8'), 'stay');
+    assert.equal(fs.existsSync(link), true);
+  } finally {
+    await fsp.rm(projectRoot, {recursive: true, force: true});
+    await fsp.rm(outside, {recursive: true, force: true});
+  }
+});
+
+test('cleans through a symlink whose target stays inside the project', async () => {
+  const {projectRoot, outputFS} = await makeProject();
+  const realDist = path.join(projectRoot, 'output');
+  const link = path.join(projectRoot, 'dist-link');
+  try {
+    await fsp.mkdir(realDist);
+    await fsp.symlink(realDist, link);
+    await fsp.writeFile(path.join(link, 'app.js'), 'bundle');
+    await fsp.writeFile(path.join(link, 'stale.txt'), 'stale');
+
+    const result = await cleanDist({
+      bundles: [
+        {
+          files: [{filePath: path.join(link, 'app.js')}],
+          target: {distDir: link},
+        },
+      ],
+      outputFS,
+      projectRoot,
+      exclude: [],
+    });
+
+    assert.equal(result.removed, 1);
+    assert.deepEqual(result.refusals, []);
+    assert.equal(await fsp.readFile(path.join(realDist, 'app.js'), 'utf8'), 'bundle');
+    assert.equal(fs.existsSync(path.join(realDist, 'stale.txt')), false);
+    assert.equal(fs.existsSync(link), true);
+  } finally {
+    await fsp.rm(projectRoot, {recursive: true, force: true});
+  }
+});
+
+test('does not treat a symlinked project path as outside the project', async () => {
+  const {projectRoot, outputFS} = await makeProject();
+  const linkRoot = path.join(path.dirname(projectRoot), 'link-root');
+  try {
+    await fsp.symlink(projectRoot, linkRoot);
+    const distDir = path.join(linkRoot, 'dist');
+    await fsp.mkdir(distDir, {recursive: true});
+    await fsp.writeFile(path.join(distDir, 'app.js'), 'bundle');
+    await fsp.writeFile(path.join(distDir, 'stale.txt'), 'stale');
+
+    const result = await cleanDist({
+      bundles: [
+        {
+          files: [{filePath: path.join(distDir, 'app.js')}],
+          target: {distDir},
+        },
+      ],
+      outputFS,
+      projectRoot: linkRoot,
+      exclude: [],
+    });
+
+    assert.deepEqual(result.refusals, []);
+    assert.equal(result.removed, 1);
+    assert.equal(fs.existsSync(path.join(projectRoot, 'dist', 'app.js')), true);
+    assert.equal(fs.existsSync(path.join(projectRoot, 'dist', 'stale.txt')), false);
+  } finally {
+    await fsp.unlink(linkRoot);
+    await fsp.rm(projectRoot, {recursive: true, force: true});
+  }
+});
+
+test('keeps a nested target symlink and still cleans inside it', async () => {
+  const {projectRoot, distDir, outputFS} = await makeProject();
+  const realNested = path.join(projectRoot, 'modern-output');
+  const nestedLink = path.join(distDir, 'modern');
+  try {
+    await fsp.mkdir(realNested);
+    await fsp.symlink(realNested, nestedLink);
+    await fsp.writeFile(path.join(distDir, 'app.js'), 'app');
+    await fsp.writeFile(path.join(distDir, 'drop.txt'), 'drop');
+    await fsp.writeFile(path.join(realNested, 'app.js'), 'modern');
+    await fsp.writeFile(path.join(realNested, 'stale.txt'), 'stale');
+    await fsp.mkdir(path.join(realNested, 'static'));
+    await fsp.writeFile(path.join(realNested, 'static', 'keep.txt'), 'keep');
+
+    const result = await cleanDist({
+      bundles: [
+        {
+          files: [{filePath: path.join(distDir, 'app.js')}],
+          target: {distDir},
+        },
+        {
+          files: [{filePath: path.join(nestedLink, 'app.js')}],
+          target: {distDir: nestedLink},
+        },
+      ],
+      outputFS,
+      projectRoot,
+      exclude: ['static/**'],
+    });
+
+    assert.equal(result.removed, 2);
+    assert.deepEqual(result.refusals, []);
+    const stat = await fsp.lstat(nestedLink);
+    assert.equal(stat.isSymbolicLink(), true);
+    assert.equal(await fsp.readFile(path.join(realNested, 'app.js'), 'utf8'), 'modern');
+    assert.equal(await fsp.readFile(path.join(realNested, 'static', 'keep.txt'), 'utf8'), 'keep');
+    assert.equal(fs.existsSync(path.join(realNested, 'stale.txt')), false);
+    assert.equal(fs.existsSync(path.join(distDir, 'drop.txt')), false);
+    assert.equal(fs.existsSync(path.join(distDir, 'app.js')), true);
+  } finally {
+    await fsp.rm(projectRoot, {recursive: true, force: true});
+  }
+});
+
+test('missing output directories are skipped', async () => {
+  const {projectRoot, outputFS} = await makeProject();
+  const missing = path.join(projectRoot, 'missing');
+  try {
+    const result = await cleanDist({
+      bundles: [
+        {
+          files: [{filePath: path.join(missing, 'app.js')}],
+          target: {distDir: missing},
+        },
+      ],
+      outputFS,
+      projectRoot,
+      exclude: [],
+    });
+
+    assert.equal(result.removed, 0);
+    assert.deepEqual(result.refusals, []);
+  } finally {
+    await fsp.rm(projectRoot, {recursive: true, force: true});
+  }
+});
+
+test('cleans when the filesystem cannot resolve symlinks', async () => {
+  const {projectRoot, distDir, outputFS} = await makeProject();
+  delete outputFS.realpath;
+  try {
+    await fsp.writeFile(path.join(distDir, 'app.js'), 'bundle');
+    await fsp.writeFile(path.join(distDir, 'stale.txt'), 'stale');
+
+    const result = await cleanDist({
+      bundles: [
+        {
+          files: [{filePath: path.join(distDir, 'app.js')}],
+          target: {distDir},
+        },
+      ],
+      outputFS,
+      projectRoot,
+      exclude: [],
+    });
+
+    assert.equal(result.removed, 1);
+    assert.deepEqual(result.refusals, []);
+    assert.equal(fs.existsSync(path.join(distDir, 'stale.txt')), false);
+  } finally {
+    await fsp.rm(projectRoot, {recursive: true, force: true});
   }
 });
 

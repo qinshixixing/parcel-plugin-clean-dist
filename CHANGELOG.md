@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Resolve symlinks before deciding whether an output directory is safe to clean. A link to the project root, the filesystem root, or a directory outside the project is left untouched.
+- Clean each target directory once. Cleaning a parent no longer walks into a nested target, and it no longer deletes a nested target that is a symlink.
+- Ignore a file that disappears between the directory listing and the delete.
+
 ## 1.0.1
 
 - Keep the output directory of a target when it becomes empty instead of deleting it. Nested target directories were removed by the parent's empty-directory cleanup.
