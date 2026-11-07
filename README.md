@@ -31,7 +31,7 @@ On `buildSuccess` in production (`parcel build`):
 - Directories that become empty are deleted. The output directory itself stays.
 - A failed build does not delete anything.
 - `parcel watch` and `parcel serve` do not delete anything unless `watch` is true.
-- A directory is left untouched when it is the project root, the filesystem root, or outside the project. Parcel reports that refusal as an error.
+- A directory is left untouched when it is the project root, the filesystem root, outside the project, or reached through a symbolic link. Parcel reports that refusal as an error.
 
 ## Configuration
 
@@ -61,6 +61,6 @@ npm install -D parcel-plugin-clean-dist@0.0.6
 
 ## 中文
 
-`1.0.0` 只支持 Parcel 2。生产构建成功后，插件会删掉每个 target 输出目录里不属于这次构建的文件。`parcel watch` 和 `parcel serve` 默认不清理。还在用 Parcel 1 的项目请锁定 `0.0.6`。
+`1.0.0` 只支持 Parcel 2。生产构建成功后，插件会删掉每个 target 输出目录里不属于这次构建的文件。`parcel watch` 和 `parcel serve` 默认不清理。输出目录本身是符号链接，或者路径中间经过符号链接时，插件不会跟着链接走。还在用 Parcel 1 的项目请锁定 `0.0.6`。
 
 在 `.parcelrc` 的 `reporters` 中加入 `parcel-plugin-clean-dist`，并保留 `"..."`。需要跳过的文件写在 `package.json` 的 `parcel-plugin-clean-dist.exclude` 里，路径相对于每个输出目录。

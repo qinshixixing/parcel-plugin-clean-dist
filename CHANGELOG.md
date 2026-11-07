@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2
+
+- Delete stale files in parallel, and walk a nested target directory only as part of its parent.
+- When an `exclude` pattern covers a whole directory, such as `static/**`, list that directory once instead of matching every nested file.
+- Refuse to clean an output directory that is a symbolic link, or that is reached through one, instead of following the link.
+
 ## 1.0.1
 
 - Keep the output directory of a target when it becomes empty instead of deleting it. Nested target directories were removed by the parent's empty-directory cleanup.

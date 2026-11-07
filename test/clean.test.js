@@ -284,6 +284,257 @@ test('names that merely start with dots stay inside the project', async () => {
   }
 });
 
+function countingFS(outputFS, reads) {
+  return {
+    ...outputFS,
+    readdir: async (directory, opts) => {
+      reads.push(directory);
+      return outputFS.readdir(directory, opts);
+    },
+  };
+}
+
+test('removes many stale files and the directories that become empty', async () => {
+  const {projectRoot, distDir, outputFS} = await makeProject();
+  const nested = path.join(distDir, 'old', 'deep');
+  try {
+    await fsp.mkdir(nested, {recursive: true});
+    await fsp.writeFile(path.join(distDir, 'app.js'), 'bundle');
+    await fsp.writeFile(path.join(nested, 'old.js'), 'old');
+    for (let i = 0; i < 40; i += 1) {
+      await fsp.writeFile(path.join(distDir, `stale-${i}.txt`), 'stale');
+    }
+
+    const result = await cleanDist({
+      bundles: [
+        {
+          files: [{filePath: path.join(distDir, 'app.js')}],
+          target: {distDir},
+        },
+      ],
+      outputFS,
+      projectRoot,
+      exclude: [],
+    });
+
+    assert.equal(result.removed, 41);
+    assert.equal(fs.existsSync(path.join(distDir, 'app.js')), true);
+    assert.equal(fs.existsSync(nested), false);
+    assert.equal(fs.existsSync(distDir), true);
+  } finally {
+    await fsp.rm(projectRoot, {recursive: true, force: true});
+  }
+});
+
+test('does not walk a directory that an exclude pattern covers', async () => {
+  const {projectRoot, distDir, outputFS} = await makeProject();
+  const reads = [];
+  const staticDir = path.join(distDir, 'static');
+  const nested = path.join(staticDir, 'nested');
+  try {
+    await fsp.mkdir(nested, {recursive: true});
+    await fsp.writeFile(path.join(nested, 'keep.txt'), 'keep');
+    await fsp.writeFile(path.join(distDir, 'drop.txt'), 'drop');
+    await fsp.writeFile(path.join(distDir, 'app.js'), 'bundle');
+
+    const result = await cleanDist({
+      bundles: [
+        {
+          files: [{filePath: path.join(distDir, 'app.js')}],
+          target: {distDir},
+        },
+      ],
+      outputFS: countingFS(outputFS, reads),
+      projectRoot,
+      exclude: ['static/**'],
+    });
+
+    assert.equal(result.removed, 1);
+    assert.equal(fs.existsSync(path.join(nested, 'keep.txt')), true);
+    assert.equal(fs.existsSync(path.join(distDir, 'drop.txt')), false);
+    assert.equal(reads.filter((dir) => dir === staticDir).length, 1);
+    assert.equal(reads.includes(nested), false);
+  } finally {
+    await fsp.rm(projectRoot, {recursive: true, force: true});
+  }
+});
+
+test('removes an empty excluded directory and still deletes other files under a partial pattern', async () => {
+  const {projectRoot, distDir, outputFS} = await makeProject();
+  const empty = path.join(distDir, 'static');
+  const partial = path.join(distDir, 'assets');
+  try {
+    await fsp.mkdir(empty);
+    await fsp.mkdir(partial, {recursive: true});
+    await fsp.writeFile(path.join(partial, 'keep.txt'), 'keep');
+    await fsp.writeFile(path.join(partial, 'old.js'), 'old');
+    await fsp.writeFile(path.join(distDir, 'app.js'), 'bundle');
+
+    const result = await cleanDist({
+      bundles: [
+        {
+          files: [{filePath: path.join(distDir, 'app.js')}],
+          target: {distDir},
+        },
+      ],
+      outputFS,
+      projectRoot,
+      exclude: ['static/**', 'assets/**/*.txt'],
+    });
+
+    assert.equal(result.removed, 1);
+    assert.equal(fs.existsSync(empty), false);
+    assert.equal(fs.existsSync(path.join(partial, 'keep.txt')), true);
+    assert.equal(fs.existsSync(path.join(partial, 'old.js')), false);
+  } finally {
+    await fsp.rm(projectRoot, {recursive: true, force: true});
+  }
+});
+
+test('walks a nested target directory once', async () => {
+  const {projectRoot, distDir, outputFS} = await makeProject();
+  const reads = [];
+  const nested = path.join(distDir, 'nested');
+  try {
+    await fsp.mkdir(nested, {recursive: true});
+    await fsp.writeFile(path.join(distDir, 'app.js'), 'bundle');
+    await fsp.writeFile(path.join(nested, 'stale.txt'), 'stale');
+
+    const result = await cleanDist({
+      bundles: [
+        {
+          files: [{filePath: path.join(distDir, 'app.js')}],
+          target: {distDir},
+        },
+        {
+          files: [],
+          target: {distDir: nested},
+        },
+      ],
+      outputFS: countingFS(outputFS, reads),
+      projectRoot,
+      exclude: [],
+    });
+
+    assert.equal(result.removed, 1);
+    assert.equal(fs.existsSync(nested), true);
+    assert.equal(fs.existsSync(path.join(nested, 'stale.txt')), false);
+    assert.equal(reads.filter((dir) => dir === nested).length, 1);
+    assert.equal(reads.filter((dir) => dir === distDir).length, 1);
+  } finally {
+    await fsp.rm(projectRoot, {recursive: true, force: true});
+  }
+});
+
+test('refuses to follow a symlinked output directory', async () => {
+  const {projectRoot, outputFS} = await makeProject();
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'clean-dist-outside-'));
+  const link = path.join(projectRoot, 'dist-link');
+  try {
+    await fsp.writeFile(path.join(outside, 'precious.txt'), 'safe');
+    await fsp.writeFile(path.join(outside, 'stale.txt'), 'stale');
+    await fsp.symlink(outside, link);
+
+    const result = await cleanDist({
+      bundles: [
+        {
+          files: [{filePath: path.join(link, 'app.js')}],
+          target: {distDir: link},
+        },
+      ],
+      outputFS,
+      projectRoot,
+      exclude: [],
+    });
+
+    assert.equal(result.removed, 0);
+    assert.equal(result.refusals.length, 1);
+    assert.match(result.refusals[0], /symbolic link/);
+    assert.equal(await fsp.readFile(path.join(outside, 'precious.txt'), 'utf8'), 'safe');
+    assert.equal(await fsp.readFile(path.join(outside, 'stale.txt'), 'utf8'), 'stale');
+    assert.equal(fs.existsSync(link), true);
+  } finally {
+    await fsp.rm(projectRoot, {recursive: true, force: true});
+    await fsp.rm(outside, {recursive: true, force: true});
+  }
+});
+
+test('keeps a symlink that an output directory is reached through', async () => {
+  const {projectRoot, distDir, outputFS} = await makeProject();
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'clean-dist-outside-'));
+  const link = path.join(distDir, 'linked');
+  const nested = path.join(link, 'nested');
+  try {
+    await fsp.mkdir(path.join(outside, 'nested'), {recursive: true});
+    await fsp.writeFile(path.join(outside, 'nested', 'stale.txt'), 'stay');
+    await fsp.writeFile(path.join(distDir, 'app.js'), 'bundle');
+    await fsp.writeFile(path.join(distDir, 'drop.txt'), 'drop');
+    await fsp.symlink(outside, link);
+
+    const result = await cleanDist({
+      bundles: [
+        {
+          files: [{filePath: path.join(distDir, 'app.js')}],
+          target: {distDir},
+        },
+        {
+          files: [{filePath: path.join(nested, 'app.js')}],
+          target: {distDir: nested},
+        },
+      ],
+      outputFS,
+      projectRoot,
+      exclude: [],
+    });
+
+    assert.equal(result.removed, 1);
+    assert.match(result.refusals.join('\n'), /reached through a symbolic link/);
+    assert.equal(await fsp.readFile(path.join(outside, 'nested', 'stale.txt'), 'utf8'), 'stay');
+    assert.equal(fs.existsSync(link), true);
+    assert.equal(fs.existsSync(path.join(distDir, 'drop.txt')), false);
+    assert.equal(fs.existsSync(path.join(distDir, 'app.js')), true);
+  } finally {
+    await fsp.rm(projectRoot, {recursive: true, force: true});
+    await fsp.rm(outside, {recursive: true, force: true});
+  }
+});
+
+test('a filesystem error rejects the clean', async () => {
+  const {projectRoot, distDir, outputFS} = await makeProject();
+  try {
+    await fsp.writeFile(path.join(distDir, 'app.js'), 'bundle');
+    await fsp.writeFile(path.join(distDir, 'stale.txt'), 'stale');
+    const failing = {
+      ...outputFS,
+      unlink: async (filePath) => {
+        if (filePath.endsWith('stale.txt')) {
+          const error = new Error('denied');
+          error.code = 'EACCES';
+          throw error;
+        }
+        return outputFS.unlink(filePath);
+      },
+    };
+
+    await assert.rejects(
+      cleanDist({
+        bundles: [
+          {
+            files: [{filePath: path.join(distDir, 'app.js')}],
+            target: {distDir},
+          },
+        ],
+        outputFS: failing,
+        projectRoot,
+        exclude: [],
+      }),
+      /denied/,
+    );
+  } finally {
+    await fsp.rm(projectRoot, {recursive: true, force: true});
+  }
+});
+
 test('cleans when readdir returns plain names instead of dirents', async () => {
   const {projectRoot, distDir} = await makeProject();
   try {
